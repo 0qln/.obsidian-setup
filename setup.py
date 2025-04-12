@@ -2,43 +2,49 @@ import os
 import sys
 import json
 import glob
+import platform
 from pathlib import Path
 
+def create_relative_symlink(source, target):
+    """Create relative symlinks that work across systems"""
+    source_path = Path(source).resolve()
+    target_path = Path(target).resolve()
+
+    # Ensure target directory exists
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Calculate relative path from target to source
+    try:
+        rel_path = os.path.relpath(source_path, target_path.parent)
+    except ValueError:
+        # Handle different drive letters on Windows
+        print(f"Can't create relative link between different drives: {source} -> {target}")
+        return
+
+    # Remove existing target if it's not our symlink
+    if target_path.exists():
+        if target_path.is_symlink():
+            current_target = os.readlink(target_path)
+            if current_target == rel_path:
+                return  # Already correct link
+        target_path.unlink()
+
+    # Create the symlink
+    print(rel_path)
+    os.symlink(rel_path, target_path)
+
 def create_symlinks(source_dir, target_dir):
-    """Create file symlinks while maintaining real directories"""
-    print(f"\nProcessing source: {source_dir}")
-    print(f"Target directory: {target_dir}")
+    """Create proper relative symlinks maintaining structure"""
+    print(f"\nProcessing: {source_dir} => {target_dir}")
 
-    for root, dirs, files in os.walk(source_dir):
-        # Create relative path from source directory
-        rel_path = os.path.relpath(root, source_dir)
-        target_root = os.path.join(target_dir, rel_path)
-
-        # Create real directories in target
-        Path(target_root).mkdir(parents=True, exist_ok=True)
-
+    for root, _, files in os.walk(source_dir):
         for file in files:
-            source_file = os.path.join(root, file)
-            target_file = os.path.join(target_root, file)
+            source_file = Path(root) / file
+            relative_path = source_file.relative_to(source_dir)
+            target_file = Path(target_dir) / relative_path
 
-            # Skip special files
-            if file in ['.gitkeep', '.gitignore']:
-                continue
-
-            # Remove existing file/symlink if needed
-            if os.path.lexists(target_file):
-                if os.path.islink(target_file) or os.path.isfile(target_file):
-                    print(f"Replacing: {target_file}")
-                    os.remove(target_file)
-                else:
-                    print(f"Skipping directory: {target_file}")
-                    continue
-
-            try:
-                print(f"Linking: {target_file} -> {source_file}")
-                os.symlink(os.path.abspath(source_file), target_file)
-            except OSError as e:
-                print(f"Error creating symlink: {e}", file=sys.stderr)
+            print(f"Linking: {target_file} -> {source_file}")
+            create_relative_symlink(source_file, target_file)
 
 def update_community_plugins(parent_dir, obsidian_sources):
     """Update community-plugins.json with plugin directory names"""
