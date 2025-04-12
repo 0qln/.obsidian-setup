@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import glob
-import platform
 from pathlib import Path
 
 def create_relative_symlink(source, target):
@@ -30,7 +29,6 @@ def create_relative_symlink(source, target):
         target_path.unlink()
 
     # Create the symlink
-    print(rel_path)
     os.symlink(rel_path, target_path)
 
 def create_symlinks(source_dir, target_dir):
