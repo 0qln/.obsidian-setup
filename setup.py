@@ -2,69 +2,58 @@ import os
 import sys
 import json
 import glob
+from pathlib import Path
 
 def create_symlinks(source_dir, target_dir):
-    """Recursively create symbolic links from source to target directory."""
+    """Create file symlinks while maintaining real directories"""
     print(f"\nProcessing source: {source_dir}")
     print(f"Target directory: {target_dir}")
 
-    # Ensure target directory exists
-    os.makedirs(target_dir, exist_ok=True)
+    for root, dirs, files in os.walk(source_dir):
+        # Create relative path from source directory
+        rel_path = os.path.relpath(root, source_dir)
+        target_root = os.path.join(target_dir, rel_path)
 
-    try:
-        items = os.listdir(source_dir)
-    except FileNotFoundError:
-        print(f"Source directory not found: {source_dir}", file=sys.stderr)
-        return
+        # Create real directories in target
+        Path(target_root).mkdir(parents=True, exist_ok=True)
 
-    for item_name in items:
-        source_item = os.path.join(source_dir, item_name)
-        target_item = os.path.join(target_dir, item_name)
+        for file in files:
+            source_file = os.path.join(root, file)
+            target_file = os.path.join(target_root, file)
 
-        source_abs = os.path.abspath(source_item)
-        target_abs = os.path.abspath(target_item)
-
-        # Skip self-referential links
-        if os.path.commonpath([source_abs]) == os.path.commonpath([source_abs, target_abs]):
-            print(f"Skipping self-referential path: {source_abs}")
-            continue
-
-        # Handle existing target items
-        if os.path.lexists(target_abs):
-            if os.path.islink(target_abs) or os.path.isfile(target_abs):
-                print(f"Replacing existing item: {target_abs}")
-                os.remove(target_abs)
-            elif os.path.isdir(target_abs):
-                if os.path.isdir(source_abs):
-                    print(f"Merging into directory: {target_abs}")
-                    create_symlinks(source_abs, target_abs)
-                continue
-            else:
-                print(f"Skipping unknown item type: {target_abs}")
+            # Skip special files
+            if file in ['.gitkeep', '.gitignore']:
                 continue
 
-        # Create new symlink or directory
-        if os.path.isdir(source_abs):
-            print(f"Creating directory symlink: {target_abs} -> {source_abs}")
-            os.symlink(source_abs, target_abs, target_is_directory=True)
-        else:
-            print(f"Creating file symlink: {target_abs} -> {source_abs}")
-            os.symlink(source_abs, target_abs)
+            # Remove existing file/symlink if needed
+            if os.path.lexists(target_file):
+                if os.path.islink(target_file) or os.path.isfile(target_file):
+                    print(f"Replacing: {target_file}")
+                    os.remove(target_file)
+                else:
+                    print(f"Skipping directory: {target_file}")
+                    continue
+
+            try:
+                print(f"Linking: {target_file} -> {source_file}")
+                os.symlink(os.path.abspath(source_file), target_file)
+            except OSError as e:
+                print(f"Error creating symlink: {e}", file=sys.stderr)
 
 def update_community_plugins(parent_dir, obsidian_sources):
-    """Update community-plugins.json in parent directory with all plugins"""
+    """Update community-plugins.json with plugin directory names"""
     json_path = os.path.join(parent_dir, "community-plugins.json")
     
-    all_plugins = []
+    plugin_dirs = set()
     for source in obsidian_sources:
-        plugins_dir = os.path.join(source, "src", "plugins")
-        if os.path.exists(plugins_dir):
+        plugins_path = os.path.join(source, "src", "plugins")
+        if os.path.exists(plugins_path):
             try:
-                plugins = [d for d in os.listdir(plugins_dir) 
-                          if os.path.isdir(os.path.join(plugins_dir, d))]
-                all_plugins.extend(plugins)
+                plugins = [d for d in os.listdir(plugins_path)
+                          if os.path.isdir(os.path.join(plugins_path, d))]
+                plugin_dirs.update(plugins)
             except OSError as e:
-                print(f"Error reading plugins from {plugins_dir}: {e}", file=sys.stderr)
+                print(f"Error reading plugins: {e}", file=sys.stderr)
 
     existing_plugins = []
     if os.path.exists(json_path):
@@ -72,19 +61,19 @@ def update_community_plugins(parent_dir, obsidian_sources):
             with open(json_path, "r") as f:
                 existing_plugins = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Error reading community-plugins.json: {e}", file=sys.stderr)
+            print(f"Error reading plugins list: {e}", file=sys.stderr)
 
-    merged_plugins = sorted(list(set(existing_plugins + all_plugins)))
+    merged_plugins = sorted(list(plugin_dirs.union(existing_plugins)))
 
     if existing_plugins != merged_plugins:
         try:
             with open(json_path, "w") as f:
                 json.dump(merged_plugins, f, indent=4)
-            print(f"Updated community-plugins.json with {len(all_plugins)} new plugins")
+            print(f"Updated community-plugins.json with {len(merged_plugins)} plugins")
         except IOError as e:
-            print(f"Error writing community-plugins.json: {e}", file=sys.stderr)
+            print(f"Error writing plugins list: {e}", file=sys.stderr)
     else:
-        print("community-plugins.json already up-to-date")
+        print("community-plugins.json unchanged")
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -94,28 +83,28 @@ def main():
     obsidian_sources = [f for f in obsidian_sources if os.path.isdir(f)]
 
     if not obsidian_sources:
-        print(f"No *.obsidian folders found in {parent_dir}", file=sys.stderr)
+        print("No *.obsidian folders found", file=sys.stderr)
         sys.exit(1)
 
     print(f"Found {len(obsidian_sources)} configuration sources:")
     for source in obsidian_sources:
         print(f" - {os.path.basename(source)}")
 
-    # First pass: Create all directory structures
+    # Process each source
     for source in obsidian_sources:
         source_src = os.path.join(source, "src")
         if not os.path.exists(source_src):
-            print(f"\nSkipping {os.path.basename(source)} - no src directory found")
+            print(f"\nSkipping {os.path.basename(source)} - no src directory")
             continue
 
         print(f"\n{'=' * 40}")
-        print(f"Processing source: {os.path.basename(source)}/src")
+        print(f"Processing: {os.path.basename(source)}/src")
         create_symlinks(source_src, parent_dir)
 
     # Update community plugins list
     update_community_plugins(parent_dir, obsidian_sources)
 
-    print("\nSetup complete. Configuration merged to:", parent_dir)
+    print("\nSetup complete. Git-friendly links created in:", parent_dir)
 
 if __name__ == "__main__":
     main()
