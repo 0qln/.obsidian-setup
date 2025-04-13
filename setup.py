@@ -22,24 +22,21 @@ def create_relative_symlink(source, target):
 
     # Remove existing target if it's not our symlink
     if target_path.exists():
-        if target_path.is_symlink():
-            current_target = os.readlink(target_path)
-            if current_target == rel_path:
-                return  # Already correct link
-        target_path.unlink()
+        os.remove(target_path)
 
     # Create the symlink
     os.symlink(rel_path, target_path)
 
 def create_symlinks(source_dir, target_dir):
     """Create proper relative symlinks maintaining structure"""
-    print(f"\nProcessing: {source_dir} => {target_dir}")
-
     for root, _, files in os.walk(source_dir):
         for file in files:
             source_file = Path(root) / file
-            relative_path = source_file.relative_to(source_dir)
-            target_file = Path(target_dir) / relative_path
+            target_file = Path(target_dir) / source_file.relative_to(source_dir)
+
+            rel_path = os.path.relpath(source_file, target_file.parent)
+            if target_file.is_symlink() and os.readlink(target_file) == rel_path:
+                continue
 
             print(f"Linking: {target_file} -> {source_file}")
             create_relative_symlink(source_file, target_file)
@@ -47,7 +44,7 @@ def create_symlinks(source_dir, target_dir):
 def update_community_plugins(parent_dir, obsidian_sources):
     """Update community-plugins.json with plugin directory names"""
     json_path = os.path.join(parent_dir, "community-plugins.json")
-    
+
     plugin_dirs = set()
     for source in obsidian_sources:
         plugins_path = os.path.join(source, "src", "plugins")
@@ -82,7 +79,7 @@ def update_community_plugins(parent_dir, obsidian_sources):
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     parent_dir = os.path.dirname(script_dir)
-    
+
     obsidian_sources = glob.glob(os.path.join(parent_dir, "*.obsidian"))
     obsidian_sources = [f for f in obsidian_sources if os.path.isdir(f)]
 
@@ -97,12 +94,13 @@ def main():
     # Process each source
     for source in obsidian_sources:
         source_src = os.path.join(source, "src")
+        obsidian = os.path.basename(source)
         if not os.path.exists(source_src):
-            print(f"\nSkipping {os.path.basename(source)} - no src directory")
+            print(f"\nSkipping {obsidian} - no src directory")
             continue
 
         print(f"\n{'=' * 40}")
-        print(f"Processing: {os.path.basename(source)}/src")
+        print(f"Processing: {obsidian}/src")
         create_symlinks(source_src, parent_dir)
 
     # Update community plugins list
