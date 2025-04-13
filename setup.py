@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import glob
+import shutil
 from pathlib import Path
 
 def create_relative_symlink(source, target):
@@ -40,6 +41,22 @@ def create_symlinks(source_dir, target_dir):
 
             print(f"Linking: {target_file} -> {source_file}")
             create_relative_symlink(source_file, target_file)
+
+def create_copies(source_dir, target_dir):
+    """Create proper copies maintaining structure"""
+    for root, _, files in os.walk(source_dir):
+        for file in files:
+            source_file = Path(root) / file
+            target_file = Path(target_dir) / source_file.relative_to(source_dir)
+
+            if target_file.exists():
+                print(f"Skipping content file {source_file}, because target {target_file} already exists.")
+                continue
+
+            print(f"Copying: {source_file} to {target_file}")
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_file, target_file)
+
 
 def update_community_plugins(parent_dir, obsidian_sources):
     """Update community-plugins.json with plugin directory names"""
@@ -106,8 +123,9 @@ def main():
         print(f"Processing: {obsidian}/src")
         create_symlinks(source_src, parent_dir)
 
+        # Obsidian can't handle notes that are links, so we need to copy.
         print(f"Processing: {obsidian}/content")
-        create_symlinks(content_src, Path(parent_dir).resolve().parent)
+        create_copies(content_src, Path(parent_dir).resolve().parent)
 
     # Update community plugins list
     update_community_plugins(parent_dir, obsidian_sources)
